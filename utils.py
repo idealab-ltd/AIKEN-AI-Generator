@@ -1,102 +1,117 @@
 """
 Utility functions for the PDF Question Extractor project.
+
+This module provides helper functions for:
+- Text chunking
+- File I/O operations for questions
+- Data formatting
 """
-import os
-import logging
+
 from typing import List, Dict, Any
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
-
-def chunk_text(text: str, chunk_size: int = 4000, overlap: int = 500) -> List[str]:
+def chunk_text(text: str, chunk_size: int = 4000) -> List[str]:
     """
-    Split text into smaller chunks for processing.
+    Split text into chunks of approximately equal size.
     
     Args:
-        text (str): Input text to be chunked
-        chunk_size (int): Maximum size of each chunk
-        overlap (int): Number of characters to overlap between chunks
-    
+        text (str): Text to split
+        chunk_size (int): Target size for each chunk
+        
     Returns:
         List[str]: List of text chunks
     """
     chunks = []
-    start = 0
+    current_pos = 0
     text_length = len(text)
 
-    while start < text_length:
-        end = start + chunk_size
-        
-        if end >= text_length:
-            chunks.append(text[start:])
+    while current_pos < text_length:
+        if current_pos + chunk_size >= text_length:
+            chunks.append(text[current_pos:])
             break
             
-        # Try to find a good breaking point (preferably at the end of an article or section)
-        break_points = [
-            text.rfind('\n\nArt.', start, end),
-            text.rfind('\n\nArticolo', start, end),
-            text.rfind('\n\nSEZIONE', start, end),
-            text.rfind('\n\nCAPO', start, end),
-            text.rfind('. ', start, end),
-            text.rfind('\n', start, end)
-        ]
+        # Try to find a good splitting point
+        end = min(current_pos + chunk_size, text_length)
         
-        # Use the first valid break point found
-        last_break = max([p for p in break_points if p != -1] or [end - overlap])
+        # Look for the last period within the chunk
+        split_pos = max(
+            text.rfind('. ', current_pos, end),
+            text.rfind('? ', current_pos, end),
+            text.rfind('! ', current_pos, end)
+        )
+        
+        if split_pos == -1:
+            # If no good splitting point found, just split at chunk_size
+            split_pos = end
             
-        if last_break != -1:
-            end = last_break + 1
-            
-        chunks.append(text[start:end])
-        start = end - overlap
+        chunks.append(text[current_pos:split_pos + 1].strip())
+        current_pos = split_pos + 1
         
     return chunks
 
-def validate_aiken_format(question: Dict[str, Any]) -> bool:
+def save_questions(questions: List[Dict[str, Any]], output_file: str):
     """
-    Validate if a question follows Aiken format requirements.
-    
-    Args:
-        question (Dict[str, Any]): Question dictionary with 'question', 'options', and 'correct' keys
-    
-    Returns:
-        bool: True if valid, False otherwise
-    """
-    if not all(key in question for key in ['question', 'options', 'correct']):
-        return False
-        
-    if len(question['options']) != 4:
-        return False
-        
-    if question['correct'] not in ['A', 'B', 'C', 'D']:
-        return False
-        
-    return True
-
-def save_questions(questions: List[Dict[str, Any]], output_file: str) -> None:
-    """
-    Save questions in Aiken format to a file.
+    Save questions in Aiken format.
     
     Args:
         questions (List[Dict[str, Any]]): List of question dictionaries
-        output_file (str): Path to output file
+        output_file (str): Path to save questions
     """
     with open(output_file, 'w', encoding='utf-8') as f:
-        for q in questions:
-            if not validate_aiken_format(q):
-                logger.warning(f"Skipping invalid question: {q['question'][:50]}...")
-                continue
-                
-            # Remove "Question:" prefix if it exists
-            question_text = q['question']
-            if question_text.startswith('Question:'):
-                question_text = question_text[9:].strip()
-                
-            f.write(f"{question_text}\n")
-            for i, option in enumerate(q['options']):
+        for question in questions:
+            # Write question text
+            f.write(f"{question['question']}\n")
+            
+            # Write options
+            for i, option in enumerate(question['options']):
                 f.write(f"{chr(65 + i)}. {option}\n")
-            f.write(f"ANSWER: {q['correct']}\n\n")
+                
+            # Write correct answer
+            f.write(f"ANSWER: {question['correct']}\n\n")
+
+def load_questions(file_path: str) -> List[Dict[str, Any]]:
+    """
+    Load questions from a file in Aiken format.
+    
+    Args:
+        file_path (str): Path to questions file
+        
+    Returns:
+        List[Dict[str, Any]]: List of question dictionaries
+    """
+    questions = []
+    current_question = None
+    
+    with open(file_path, 'r', encoding='utf-8') as f:
+        lines = f.readlines()
+        
+    i = 0
+    while i < len(lines):
+        line = lines[i].strip()
+        
+        if not line:
+            if current_question and len(current_question['options']) == 4:
+                questions.append(current_question)
+            current_question = None
+            i += 1
+            continue
+            
+        if not line.startswith(('A.', 'B.', 'C.', 'D.', 'ANSWER:')):
+            # This is a question
+            current_question = {
+                'question': line,
+                'options': [],
+                'correct': None
+            }
+        elif line.startswith('ANSWER:'):
+            if current_question:
+                current_question['correct'] = line.split(':')[1].strip()
+        elif current_question and line[0] in 'ABCD' and line[1] == '.':
+            current_question['options'].append(line[2:].strip())
+            
+        i += 1
+        
+    # Add the last question if it exists
+    if current_question and len(current_question['options']) == 4:
+        questions.append(current_question)
+        
+    return questions
