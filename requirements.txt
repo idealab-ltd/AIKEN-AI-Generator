@@ -1,0 +1,9 @@
+requests>=2.31.0
+PyPDF2>=3.0.0
+tqdm>=4.65.0  # For progress bars
+colorama>=0.4.6  # For colored terminal output
+python-dotenv>=1.0.0  # For environment variables
+langchain==0.0.350
+transformers==4.36.1
+torch==2.2.0
+deep-translator==1.11.4
